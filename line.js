@@ -19,7 +19,6 @@ function setup() {
 	canvas.style.width="100%";
 	canvas.style.height="100%";
 	canvas.style.backgroundColor = "#000";
-	canvas.mozOpaque = true;
 	container.appendChild(canvas);
 	//insert at position
 	var scripts = document.getElementsByTagName('script')
@@ -27,23 +26,10 @@ function setup() {
 	script.parentNode.insertBefore(container,script);
 	//set size after adding
 	var boundsize = canvas.getBoundingClientRect();
-	canvas.width = boundsize.width || 100;
-	canvas.height = boundsize.height || 100;
+	canvas.width = boundsize.width;
+	canvas.height = boundsize.height;
 	ctx = canvas.getContext("2d");
 	window.addEventListener('resize',figuresize,false);
-
-	if (canvas.mozRequestFullScreen)
-		//if (0)
-	{
-		var but = document.createElement("button");
-		but.innerHTML='□';
-		but.style.cssText="width:30px;height:30px;margin:10px;padding:0;position:absolute;bottom:0;right:0;background:#444;border:1px solid;border-radius:0;color:#eee;box-shadow:none;font:20px sans-serif;text-align:center;opacity:.5;-moz-user-select:none;-webkit-user-select: none";
-		container.appendChild(but);
-		but.addEventListener('click',function(){
-			console.log("Enter fullscreen");
-			canvas.mozRequestFullScreen();
-		});
-	}
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -90,6 +76,7 @@ var env = {
 	ctime : null,
 	cup : null,
 	linelist : [],
+	fps : 0,
 };
 
 function genLine(x,y)
@@ -269,7 +256,7 @@ function draw(dt)
 	var i,j,ctx3,cw,ch;
 	cw = canvas.width;
 	ch = canvas.height;
-	//clear canvas
+	//clear canvases that are not opaque
 	//ctx.clearRect(0,0,cw,ch);
 	ctx.fillStyle = "#000";
 	ctx.fillRect(0,0,cw,ch);
@@ -278,7 +265,7 @@ function draw(dt)
 	{
 		j = env.linelist[i];
 		ctx.globalAlpha = j.alpha;
-		ctx.drawImage(env.line, j.x, Math.floor(j.y));
+		ctx.drawImage(env.line, j.x, j.y);
 	}
 	ctx.globalAlpha = 1.0;
 
@@ -302,7 +289,7 @@ function draw(dt)
 		j = env.linelist[i];
 		if (j.tip)
 		{
-			ctx.drawImage(env.lines,j.x,Math.floor(j.y)+env.lineheight-env.tipheight);
+			ctx.drawImage(env.lines,j.x,j.y+env.lineheight-env.tipheight);
 		}
 	}
 	ctx.globalAlpha = 1.0;
@@ -385,26 +372,59 @@ function figuresize()
 function run()
 {
 	init();
-	var lastUpdate = Date.now();
-	var lastTimestep = 0;
-	var dt = 0;
-	//var myInterval = setInterval(tick, 0);
-	window.requestAnimationFrame(tick);
+	var last = performance.now() / 1000;
+	var fpsThreshold = 0;	
+	window.requestAnimationFrame(tickweb);
 
-	function tick(timestep) {
-		//var now = Date.now();
-		//var dt = now - lastUpdate;
-		//lastUpdate = now;
-		dt = timestep - lastTimestep;
-		lastTimestep =  timestep;
-		if (dt<0) { dt=0; }
+	function tickweb() {
+		// Keep animating
+		window.requestAnimationFrame(tickweb);
 
-		dt = dt/1000;
+		// Figure out how much time passed since the last animation
+		var now = performance.now() / 1000;
+		var dt = Math.min(now - last, 1);
+		last = now;
+
+		// If there is an FPS limit, abort updating the animation if we reached the desired FPS
+		if (env.fps > 0) {
+			fpsThreshold += dt;
+			if (fpsThreshold < 1.0 / env.fps) {
+				return;
+			}
+			fpsThreshold -= 1.0 / env.fps;
+		}
+
+		// My wallpaper animation/drawing code goes here!
 		update(dt);
 		draw(dt);
-		window.requestAnimationFrame(tick);
 	}
 }
+
+//wallpaper engine events
+window.wallpaperPropertyListener = {
+	applyUserProperties: function(properties) {
+		if (properties.linecount) {
+			setLineCount(properties.linecount.value);
+		}
+		if (properties.lineheight) {
+			setLineHeight(properties.lineheight.value);
+		}
+		if (properties.linewidth) {
+			setLineWidth(properties.linewidth.value);
+		}
+		if (properties.linespeed) {
+			setLineSpeed(properties.linespeed.value);
+		}
+		if (properties.colorspeed) {
+			setColorSpeed(properties.colorspeed.value);
+		}
+	},
+	applyGeneralProperties: function(properties) {
+		if (properties.fps) {
+			env.fps = properties.fps;
+		}
+	}
+};
 
 setup();
 run();

@@ -1,0 +1,60 @@
+{
+	"description" : "Watch color calmly drip down your desktop.",
+	"file" : "index.html",
+	"general" : 
+	{
+		"properties" : 
+		{
+			"colorspeed" : 
+			{
+				"editable" : false,
+				"max" : 600,
+				"min" : 0,
+				"text" : "Color Rate",
+				"type" : "slider",
+				"value" : 30
+			},
+			"linecount" : 
+			{
+				"editable" : false,
+				"max" : 400,
+				"min" : 1,
+				"text" : "Coverage",
+				"type" : "slider",
+				"value" : 100
+			},
+			"lineheight" : 
+			{
+				"editable" : false,
+				"max" : 2048,
+				"min" : 32,
+				"text" : "Length",
+				"type" : "slider",
+				"value" : 1024
+			},
+			"linespeed" : 
+			{
+				"editable" : false,
+				"max" : 500,
+				"min" : 0,
+				"text" : "Speed",
+				"type" : "slider",
+				"value" : 60
+			},
+			"schemecolor" : 
+			{
+				"order" : 0,
+				"text" : "ui_browse_properties_scheme_color",
+				"type" : "color",
+				"value" : "0 0 0"
+			}
+		}
+	},
+	"monetization" : false,
+	"preview" : "preview.gif",
+	"tags" : [ "Abstract" ],
+	"title" : "Chroma Drencher",
+	"type" : "web",
+	"visibility" : "public",
+	"workshopid" : 1153238076
+}
