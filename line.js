@@ -1,8 +1,9 @@
 "use strict";
+(function(){
 //////////////////////////////////////////////////////////////////////////
-// Setup HTML and Canvas
+//Setup
 /////////////////////////////////////////////////////////////////////////
-var usingGL=true;
+var usingGL = false;
 var container;
 
 //canvas for drawing
@@ -24,8 +25,6 @@ function start() {
 		setupCanvas(container);
 		run();
 	}
-	createFS();
-	console.log("Started");
 }
 
 function setupCanvas(container) {
@@ -34,7 +33,6 @@ function setupCanvas(container) {
 	canvas.style.width="100%";
 	canvas.style.height="100%";
 	canvas.style.backgroundColor = "#000";
-	canvas.mozOpaque = true;
 	container.appendChild(canvas);
 	//insert at position
 	var scripts = document.getElementsByTagName('script')
@@ -77,34 +75,7 @@ function setupGL(container) {
 	window.addEventListener('resize',figuresize,false);
 	canvas = renderer.domElement;
 }
-function createFS()
-{
-	if (canvas.mozRequestFullScreen||canvas.webkitRequestFullScreen)
-		//if (0)
-	{
-		var but = document.createElement("button");
-		but.innerHTML='□';
-		but.style.cssText="width:30px;height:30px;margin:10px;padding:0;position:absolute;bottom:0;right:0;background:#444;border:1px solid;border-radius:0;color:#eee;box-shadow:none;font:20px sans-serif;text-align:center;opacity:.5;-moz-user-select:none;-webkit-user-select: none";
-		container.appendChild(but);
-		but.addEventListener('click',function(){
-			console.log("Enter fullscreen");
-			if (canvas.mozRequestFullScreen) canvas.mozRequestFullScreen();
-			else if (canvas.webkitRequestFullScreen) canvas.webkitRequestFullScreen();
-		});
-	}
 
-	var but2 = document.createElement("button");
-	if (usingGL) but2.innerHTML='G';
-	else but2.innerHTML='C';
-	but2.style.cssText="width:30px;height:30px;margin:10px;padding:0;position:absolute;bottom:0;right:35px;background:#444;border:1px solid;border-radius:0;color:#eee;box-shadow:none;font:20px sans-serif;text-align:center;opacity:.5;-moz-user-select:none;-webkit-user-select: none";
-	container.appendChild(but2);
-	but2.addEventListener('click',function(){
-		console.log("Toggle mode");
-		toggleGL(!usingGL);
-		if (usingGL) but2.innerHTML='G';
-		else but2.innerHTML='C';
-	});
-}
 ///////////////////////////////////////////////////////////////////////
 // Utility functions
 ///////////////////////////////////////////////////////////////////////
@@ -130,25 +101,29 @@ Array.prototype.shuffle = function() {
 //////////////////////////////////////////////////////////////
 
 var env = {
-	linedensity : 100, // percentage amount of lines for canvas width
-	lineheight : 1024, // height of lines in px
-	linewidth : 2,     // width of lines in px
-	tipheight : 64,    // height of tip in px
-	linespeed : 10,    // speed of falling lines
-	cspeed : 30,       // speed of color gradient change
-	linecount : null,    // actual amount of lines
-	tipcount: 0,       // actual amount of tips
-	line : null,       // ref to line canvas object
-	tip : null,      // ref to tip canvas object
-	fadeB : null,       // ref to bottom gradient fade object
-	fadeT : null,      // ref to top gradient fade object
-	cs : null,         // ref to top color gradient object (only canvas)
-	cs2 : null,        // ref to bottom color gradient object (only canvas)
-	csback : null,     // ref to main color gradient object
-	ctime : null,      // blend amount between color gradients
-	cup : null,        // blend direction between color gradients
-	linelist : [],     // array of line objects
-	frameID: 0,        // ref to requestAnimationFrame
+	linedensity : 100,
+	lineheight : 1024,
+	linewidth : 2,
+	tipheight : 64,
+	linespeed : 10,
+	cspeed : 30,
+	linecount : null,
+	tipcount: 0,
+	line : null,
+	tip : null,
+	fadeB : null,
+	fadeT : null,
+	cs : null,
+	cs2 : null,
+	csback : null,
+	linebatch : null,
+	linebatchS : null,
+	ctime : null,
+	cup : null,
+	linelist : [],
+	frameID: 0,
+	fps : 0,
+	fpslock: true
 };
 
 function genShader()
@@ -295,9 +270,9 @@ function colorSpan(top)
 	var h = canvas.height;
 	var c;
 	if (top) c = env.cs;
-	else c = env.cs2
+	else c = env.cs2;
 	var ct = coolColors();
-	var ctx = c.getContext("2d", {alpha:false});
+	var ctx = c.getContext("2d");
 	ctx.clearRect(0,0,w,h);
 	var gap = w/(ct.length-1);
 	var x = 0;
@@ -315,9 +290,9 @@ function colorSpan(top)
 
 function colorSpanGL(top)
 {
-	var ct, len, i;
-	ct = coolColors();
-	len = ct.length;
+	var ct = coolColors();
+	var len = ct.length;
+	var i;
 	for (i=0;i<len;++i)
 	{
 		if (top) env.csback.material.uniforms["acolor"].value.set(ct[i],i*3);
@@ -325,7 +300,6 @@ function colorSpanGL(top)
 	}
 	if (top) env.csback.material.uniforms["alen"].value = len;
 	else env.csback.material.uniforms["alen2"].value = len;
-	//console.log(len);
 }
 
 function prepareLines()
@@ -363,16 +337,10 @@ function prepareLines()
 	for (i=env.linelist.length-1;i>=0;i--) {
 		if (env.linelist[i].tip) env.tipcount++;
 	}
+
 }
 
-// Z order
-// 0 - Lines
-// 1 - ColorGradient
-// 2 - Tips
-// 3 - Fades
-//
-//
-function initGL()
+function initGL(reload)
 {
 	prepareLines();
 	env.ctime = 0;
@@ -402,6 +370,7 @@ function initGL()
 	scene.add(lineobj);
 	scene.add(tipobj);
 
+	if (!reload) {
 	//setup color
 	var colorgeo = new THREE.PlaneGeometry(canvas.width,canvas.height);
 	var colorshader = genShaderBlend();
@@ -414,6 +383,11 @@ function initGL()
 	env.csback = colorobj;
 	colorSpanGL(true);
 	colorSpanGL(false);
+	}
+	else
+	{
+		scene.add(env.csback);
+	}
 
 	// setup data structs
 	env.line = {geo: linegeo, obj: lineobj};
@@ -450,6 +424,7 @@ function initGL()
 	scene.add(fadeBobj);
 	scene.add(fadeTobj);
 }
+
 function GLdraw()
 {
 	var offsets = env.line.geo.getAttribute('offset').array;
@@ -546,13 +521,13 @@ function update(dt)
 
 }
 
-function draw()
+function draw(dt)
 {
 	var i,j,ctx,ctx3,cw,ch;
 	cw = canvas.width;
 	ch = canvas.height;
-	ctx = canvas.getContext('2d', {alpha:false});
-	//clear canvas
+	ctx = canvas.getContext("2d");
+	//clear canvases that are not opaque
 	//ctx.clearRect(0,0,cw,ch);
 	ctx.fillStyle = "#000";
 	ctx.fillRect(0,0,cw,ch);
@@ -561,12 +536,12 @@ function draw()
 	{
 		j = env.linelist[i];
 		ctx.globalAlpha = j.alpha;
-		ctx.drawImage(env.line, cw-j.x, Math.floor(j.y));
+		ctx.drawImage(env.line, cw-j.x, j.y);
 	}
 	ctx.globalAlpha = 1.0;
 
 	//preblend color gradient overlay to temp canvas
-	ctx3 = env.csback.getContext("2d", {alpha:false});
+	ctx3 = env.csback.getContext("2d");
 	ctx3.globalAlpha = 1.0;
 	ctx3.drawImage(env.cs,0,0,cw,ch);
 	ctx3.globalAlpha = env.ctime/255;
@@ -585,7 +560,7 @@ function draw()
 		j = env.linelist[i];
 		if (j.tip)
 		{
-			ctx.drawImage(env.tip,cw-j.x,Math.floor(j.y)+env.lineheight-env.tipheight);
+			ctx.drawImage(env.tip,cw-j.x,j.y+env.lineheight-env.tipheight);
 		}
 	}
 	ctx.globalAlpha = 1.0;
@@ -607,8 +582,9 @@ function setLineCount(n)
 	}
 	if (usingGL) {
 		while (scene.children.length > 0) scene.remove(scene.children[0]);
-		initGL();
+		initGL(true);
 	}
+
 }
 
 function setLineHeight(n)
@@ -670,12 +646,14 @@ function setColorSpeed(n)
 		env.cspeed = n;
 	}
 }
+
 function toggleGL(enabled)
 {
-	if ((usingGL && enabled)||(!usingGL && !enabled)) return;
-
+	if ((usingGL && enabled)||(!usingGL && !enabled)) {
+		return;
+	}
 	window.cancelAnimationFrame(env.frameID);
-	document.body.removeChild(container);
+	if (container) document.body.removeChild(container);
 
 	// cleanup webgl
 	if (renderer) {
@@ -701,7 +679,6 @@ function toggleGL(enabled)
 
 function figuresize()
 {
-	console.log("Resize event");
 	if (usingGL) {
 		var boundsize = container.getBoundingClientRect();
 		var w = boundsize.width;
@@ -716,8 +693,7 @@ function figuresize()
 		renderer.setSize(w,h);
 		while (scene.children.length > 0) scene.remove(scene.children[0]);
 		initGL();
-	}
-	else {
+	} else {
 		var boundsize = canvas.getBoundingClientRect();
 		canvas.width = boundsize.width;
 		canvas.height = boundsize.height;
@@ -735,26 +711,73 @@ function run()
 {
 	if (usingGL) initGL();
 	else initCanvas();
-	var lastUpdate = Date.now();
-	var lastTimestep = 0;
-	var dt = 0;
-	env.frameID = window.requestAnimationFrame(tick);
+	var last = performance.now() / 1000;
+	var fpsThreshold = 0;	
+	env.frameID = window.requestAnimationFrame(tickweb);
 
-	function tick(timestep) {
-		dt = (timestep - lastTimestep) / 1000;
-		lastTimestep =  timestep;
-		if (dt<0) { dt=0; }
-		if (dt>.1) { dt=.1; }
+	function tickweb() {
+		// Keep animating
+		env.frameID = window.requestAnimationFrame(tickweb);
 
+		// Figure out how much time passed since the last animation
+		var now = performance.now() / 1000;
+		var dt = Math.min(now - last, 1);
+		last = now;
+
+		// If there is an FPS limit, abort updating the animation if we reached the desired FPS
+		if (env.fps > 0 && env.fpslock) {
+			fpsThreshold += dt;
+			if (fpsThreshold < 1.0 / env.fps) {
+				return;
+			}
+			fpsThreshold -= 1.0 / env.fps;
+		}
+
+		// My wallpaper animation/drawing code goes here!
 		if (usingGL) {
 			update(dt);
 			GLdraw();
 		} else {
 			update(dt);
-			draw();
+			draw(dt);
 		}
-		env.frameID = window.requestAnimationFrame(tick);
 	}
 }
 
+//wallpaper engine events
+window.wallpaperPropertyListener = {
+	applyUserProperties: function(properties) {
+		if (properties.linecount) {
+			setLineCount(properties.linecount.value);
+		}
+		if (properties.lineheight) {
+			setLineHeight(properties.lineheight.value);
+		}
+		if (properties.linewidth) {
+			setLineWidth(properties.linewidth.value);
+		}
+		if (properties.linespeed) {
+			setLineSpeed(properties.linespeed.value);
+		}
+		if (properties.colorspeed) {
+			setColorSpeed(properties.colorspeed.value);
+		}
+		if (properties.fpslock) {
+			env.fpslock = properties.fpslock.value;
+		}
+		if (properties.rendererpick) {
+			var rendid = properties.rendererpick.value;
+			if (rendid == 1) toggleGL(true);
+			if (rendid == 2) toggleGL(false);
+		}
+	},
+	applyGeneralProperties: function(properties) {
+		if (properties.fps) {
+			env.fps = properties.fps;
+		}
+	}
+};
+
+console.log("Chroma Drencher v1.1");
 start();
+})();

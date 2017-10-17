@@ -12,7 +12,8 @@
 				"min" : 0,
 				"text" : "Color Rate",
 				"type" : "slider",
-				"value" : 30
+				"value" : 30,
+				"order" : 4
 			},
 			"linecount" : 
 			{
@@ -21,7 +22,8 @@
 				"min" : 1,
 				"text" : "Coverage",
 				"type" : "slider",
-				"value" : 100
+				"value" : 100,
+				"order" : 1
 			},
 			"lineheight" : 
 			{
@@ -30,7 +32,8 @@
 				"min" : 32,
 				"text" : "Length",
 				"type" : "slider",
-				"value" : 1024
+				"value" : 1024,
+				"order" : 2
 			},
 			"linespeed" : 
 			{
@@ -39,11 +42,31 @@
 				"min" : 0,
 				"text" : "Speed",
 				"type" : "slider",
-				"value" : 60
+				"value" : 60,
+				"order" : 3
+			},
+			"fpslock" :
+			{
+				"text" : "Lock Frame Rate",
+				"type" : "bool",
+				"value" : true,
+				"order" : 5,
+				"condition" : "true"
+			},
+			"rendererpick" :
+			{
+				"order" : 6,
+				"text" : "Draw Method",
+				"type" : "combo",
+				"value" : 1,
+				"options" : [
+					{"value":1,"label":"WebGL (Faster)"},
+					{"value":2,"label":"Canvas (Slower)"}
+				]
 			},
 			"schemecolor" : 
 			{
-				"order" : 0,
+				"order" : 7,
 				"text" : "ui_browse_properties_scheme_color",
 				"type" : "color",
 				"value" : "0 0 0"
