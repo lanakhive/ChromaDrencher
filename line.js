@@ -1,783 +1,256 @@
 "use strict";
-(function(){
-//////////////////////////////////////////////////////////////////////////
-//Setup
-/////////////////////////////////////////////////////////////////////////
-var usingGL = false;
-var container;
+/////////////////////////////////////////////////////////////////////////////
+// Setup
+/////////////////////////////////////////////////////////////////////////////
 
-//canvas for drawing
-var canvas;
+// container for canvas
+let container;
+
+// canvas for drawing
+let canvas;
 
 function start() {
-	//create container
-	container = document.createElement("div");
-	container.style.width="100%";
-	container.style.height="100%";
-	//container.style.position="relative";
+
+	// create container with canvas
+	container = document.createElement('div');
+	container.style.width = '100%';
+	container.style.height = '100%';
 	container.id = "chromadrencher";
-
-	if (usingGL) {
-		setupGL(container);
-		run();
-	}
-	else {
-		setupCanvas(container);
-		run();
-	}
-}
-
-function setupCanvas(container) {
-	//create canvas
-	canvas = document.createElement("canvas");
-	canvas.style.width="100%";
-	canvas.style.height="100%";
-	canvas.style.backgroundColor = "#000";
+	canvas = document.createElement('canvas');
+	canvas.style.width = '100%';
+	canvas.style.height = '100%';
 	container.appendChild(canvas);
-	//insert at position
-	var scripts = document.getElementsByTagName('script')
-	var script = scripts[scripts.length-1];
-	script.parentNode.insertBefore(container,script);
-	//set size after adding
-	var boundsize = canvas.getBoundingClientRect();
-	canvas.width = boundsize.width || 100;
-	canvas.height = boundsize.height || 100;
-	window.addEventListener('resize',figuresize,false);
+
+	// insert container right before this script tag
+	const scripts = document.getElementsByTagName('script');
+	const script = scripts[scripts.length - 1];
+	script.parentNode.insertBefore(container, script);
+
+	// calculate canvas drawing size
+	const dpr = state.dprscale ? (window.devicePixelRatio || 1) : 1;
+	const dimensions = canvas.getBoundingClientRect();
+	canvas.width = dimensions.width * dpr;
+	canvas.height = dimensions.height * dpr;
+
+	// prepare context event handlers, can happen anytime after context creation
+	canvas.addEventListener('webglcontextcreationerror', contextError, false);
+	canvas.addEventListener('webglcontextlost', contextLost, false);
+	canvas.addEventListener('webglcontextrestored', contextRegen, false);
+
+	console.log("Chroma Drencher v1.2");
+
+	chromad = new Chroma();
+	setupGL(canvas);
+	run();
 }
 
-var renderer;
-var camera;
-var scene;
-function setupGL(container) {
-	//insert at position
-	var scripts = document.getElementsByTagName('script')
-	var script = scripts[scripts.length-1];
-	script.parentNode.insertBefore(container,script);
+/////////////////////////////////////////////////////////////////////////////
+// WebGL Rendering
+/////////////////////////////////////////////////////////////////////////////
 
-	var boundsize = container.getBoundingClientRect();
-	var width = boundsize.width;
-	var height = boundsize.height;
-	scene = new THREE.Scene();
-	// create 2d ortho cam facing-z with non-normalized coordinates at zero center
-	camera = new THREE.OrthographicCamera(width/-2,width/2,height/2,height/-2,0,30);
-	camera.rotation.z = Math.PI;
-	// move camera so origin is bottom left
-	camera.position.x = width/2;
-	camera.position.y = height/2;
-	camera.position.z = 10;
-	// create renderer
-	renderer = new THREE.WebGLRenderer();
-	//renderer.sortObjects = false;
-	// renderer.context.disable(renderer.context.DEPTH_TEST);
-	renderer.setSize(width, height);
-	container.appendChild(renderer.domElement);
-	renderer.render(scene,camera);
-	window.addEventListener('resize',figuresize,false);
-	canvas = renderer.domElement;
-}
+// webgl context
+let gl;
 
-///////////////////////////////////////////////////////////////////////
-// Utility functions
-///////////////////////////////////////////////////////////////////////
-function randI(min, max) {
-  min = Math.ceil(min);
-  max = Math.floor(max);
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-Array.prototype.shuffle = function() {
-  var i = this.length, j, temp;
-  if ( i == 0 ) return this;
-  while ( --i ) {
-     j = Math.floor( Math.random() * ( i + 1 ) );
-     temp = this[i];
-     this[i] = this[j];
-     this[j] = temp;
-  }
-  return this;
-}
-//////////////////////////////////////////////////////////////
-// Main App
-//////////////////////////////////////////////////////////////
-
-var env = {
-	linedensity : 100,
-	lineheight : 1024,
-	linewidth : 2,
-	tipheight : 64,
-	linespeed : 10,
-	cspeed : 30,
-	linecount : null,
-	tipcount: 0,
-	line : null,
-	tip : null,
-	fadeB : null,
-	fadeT : null,
-	cs : null,
-	cs2 : null,
-	csback : null,
-	linebatch : null,
-	linebatchS : null,
-	ctime : null,
-	cup : null,
-	linelist : [],
+// chroma webgl state
+let state = {
+	fps: 0,
+	fpslock: true,
+	fpsThreshold: 0,
+	totaldt: 0,
+	dprscale: false,
+	lastTime: 0,
+	lastDt: 0,
 	frameID: 0,
-	fps : 0,
-	fpslock: true
+	resizeID: null,
+	renderer: null,
+	language: null,
+	camera: new Camera(0,0,0,0),
+	vrcamera: new Camera(0,0,0,0),
 };
 
-function genShader()
-{
-	var vxshad =
-`precision highp float;
+let chromad;
+let chromagl;
 
-uniform mat4 modelViewMatrix;
-uniform mat4 projectionMatrix;
-attribute vec3 position;
+function setupGL(canvas) {
 
-attribute vec4 acolor;
-attribute vec3 offset;
-attribute float opacity;
-varying vec4 vacolor;
-varying float op;
-void main() {
-vacolor = acolor;
-op = opacity;
-vec4 modelViewPosition = modelViewMatrix * vec4(offset + position, 1.0);
-gl_Position = projectionMatrix * modelViewPosition;
-}`;
-	var fgshad =
-`precision highp float;
-varying vec4 vacolor;
-varying float op;
-void main() {
-gl_FragColor = vacolor;
-gl_FragColor.a *= op;
-}`;
-	var shad = new THREE.RawShaderMaterial({
-		vertexShader: vxshad,
-		fragmentShader: fgshad,
-		transparent: true,
-	});
-	return shad;
+	// create webgl context
+	gl = canvas.getContext('webgl2', {antialias: false, preserveDrawingBuffer: false, xrCompatible: true});
+	gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+	gl.enable(gl.BLEND);
+	//gl.blendEquation(gl.FUNC_ADD);
+	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+	gl.clearColor(0.0, 0.0, 0.0, 1.0);
+	gl.clear(gl.COLOR_BUFFER_BIT);
+
+	state.renderer = gl.getParameter(gl.RENDERER);
+	state.language = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+
+	chromagl = new Chromagl(chromad, gl);
+	chromagl.setup();
+
+	//set fixed camera matrix uniforms
+	setCamera(gl);
+
+	window.addEventListener('resize', onResize, false);
+
+	chromagl.resetLineState();
 }
 
-function genShaderBlend()
-{
-	var vxshad =
-`precision highp float;
 
-uniform mat4 modelViewMatrix;
-uniform mat4 projectionMatrix;
-attribute vec3 position;
+function drawGL() {
 
-void main() {
-vec4 modelViewPosition = modelViewMatrix * vec4(position, 1.0);
-gl_Position = projectionMatrix * modelViewPosition;
-}`;
-	var fgshad =
-`precision highp float;
-uniform vec3 acolor[5];
-uniform vec3 acolor2[5];
-uniform float alen;
-uniform float alen2;
-uniform float opacity;
-uniform vec2 resolution;
-void main() {
-float div1 = 1.0/(alen-1.0);
-float div2 = 1.0/(alen2-1.0);
-float x = gl_FragCoord.x / resolution.x;
-vec3 color1 = mix(acolor[0],acolor[1], smoothstep(0.0, div1, x));
-color1 = mix(color1,acolor[2], smoothstep(div1, div1*2.0, x));
-color1 = mix(color1,acolor[3], smoothstep(div1*2.0, div1*3.0, x));
-color1 = mix(color1,acolor[4], smoothstep(div1*3.0, div1*4.0, x));
-vec3 color2 = mix(acolor2[0],acolor2[1], smoothstep(0.0, div2, x));
-color2 = mix(color2,acolor2[2], smoothstep(div2, div2*2.0, x));
-color2 = mix(color2,acolor2[3], smoothstep(div2*2.0, div2*3.0, x));
-color2 = mix(color2,acolor2[4], smoothstep(div2*3.0, div2*4.0, x));
-gl_FragColor = vec4(mix(color1/255.0, color2/255.0, opacity), 1.0);
-}`;
-	var shad = new THREE.RawShaderMaterial({
-		vertexShader: vxshad,
-		fragmentShader: fgshad,
-		transparent: true,
-		blending: THREE.MultiplyBlending,
-		uniforms : {
-			"acolor": {value: new Float32Array(5*3)},
-			"acolor2": {value: new Float32Array(5*3)},
-			"alen": {value: 3.0},
-			"alen2": {value: 2.0},
-			"opacity": {value: 1.0},
-			"resolution": {value: new THREE.Vector2()},
-		},
-	});
-	return shad;
+	chromagl.updateUniforms();
+
+	// clear before draw
+	gl.clearColor(chromad.backgroundColor[0], chromad.backgroundColor[1], chromad.backgroundColor[2], 1.0);
+	gl.clearDepth(1.0)
+	gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+	chromagl.draw(state.camera);
 }
 
-function genGLGradientGeo(w,h,r,g,b,topa,bota)
-{
-	var bgeo = new THREE.InstancedBufferGeometry();
-	var ver = new Float32Array([
-		0.0,0.0,0.0,
-		w  ,0.0,0.0,
-		0.0,h  ,0.0,
+function setCamera(gl) {
+	// if ortho is not used, gl-matrix library is required
+	const useOrtho = true;
 
-		0.0,h  ,0.0,
-		w  ,0.0,0.0,
-		w  ,h  ,0.0
-	]);
-	var acol = new Float32Array([
-		r,g,b,topa,
-		r,g,b,topa,
-		r,g,b,bota,
+	if (useOrtho) {
+		const identityMatrix = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+		const width = gl.canvas.width / 2;
+		const height = (chromad.rotation == 180) ? (gl.canvas.height / 2) : (gl.canvas.height / -2);
+		const projectionMatrix = orthoMatrix(-width, width, -height, height, 0, 200);
+		state.camera.projectionMatrix = projectionMatrix;
+		state.camera.viewMatrix = identityMatrix;
+		state.camera.viewPort.x = 0;
+		state.camera.viewPort.y = 0;
+		state.camera.viewPort.width = gl.drawingBufferWidth;
+		state.camera.viewPort.height = gl.drawingBufferHeight;
 
-		r,g,b,bota,
-		r,g,b,topa,
-		r,g,b,bota,
-	]);
-	bgeo.addAttribute('position', new THREE.BufferAttribute(ver, 3));
-	bgeo.addAttribute('acolor', new THREE.BufferAttribute(acol, 4));
-	return bgeo;
-}
-
-function genGradient(w,h,r,g,b,top,bottom)
-{
-	var c = document.createElement("canvas");
-	c.width = w;
-	c.height = h;
-	var ctx = c.getContext("2d");
-
-	var grad = ctx.createLinearGradient(0,0,0,h);
-	grad.addColorStop(0, "rgba("+r+","+g+","+b+","+top+")");
-	grad.addColorStop(1, "rgba("+r+","+g+","+b+","+bottom+")");
-	ctx.fillStyle = grad;
-	ctx.fillRect(0,0,w,h);
-	return c;
-}
-
-function coolColors()
-{
-	var ct = [[255,40,100],[255,255,0],[255,150,0],[150,0,255],[150,255,100],[255,0,200],[40,100,255]];
-	ct.shuffle();
-	var r = randI(3,5);
-	ct = ct.slice(0,r);
-	return ct;
-}
-
-function colorSpan(top)
-{
-	var w = canvas.width;
-	var h = canvas.height;
-	var c;
-	if (top) c = env.cs;
-	else c = env.cs2;
-	var ct = coolColors();
-	var ctx = c.getContext("2d");
-	ctx.clearRect(0,0,w,h);
-	var gap = w/(ct.length-1);
-	var x = 0;
-
-	var grad = ctx.createLinearGradient(0,0,w,0);
-	for (var i=0; i<ct.length; i++)
-	{
-		grad.addColorStop(x, "rgb("+ct[i][0]+","+ct[i][1]+","+ct[i][2]+")");
-		x = x + ((gap)/w);
-	}
-	ctx.fillStyle = grad;
-	ctx.fillRect(0,0,w,h);
-	return c;
-}
-
-function colorSpanGL(top)
-{
-	var ct = coolColors();
-	var len = ct.length;
-	var i;
-	for (i=0;i<len;++i)
-	{
-		if (top) env.csback.material.uniforms["acolor"].value.set(ct[i],i*3);
-		else env.csback.material.uniforms["acolor2"].value.set(ct[i],i*3);
-	}
-	if (top) env.csback.material.uniforms["alen"].value = len;
-	else env.csback.material.uniforms["alen2"].value = len;
-}
-
-function prepareLines()
-{
-	env.linecount = env.linedensity * canvas.width / 100;
-	if (env.linelist.length == env.linecount) return;
-	env.tipcount = 0;
-	//generate lines
-	while (env.linelist.length < env.linecount)
-	{
-		var t = {};
-		t.x = randI(0, canvas.width);
-		//align to linewidth
-		//t.x = t.x - (t.x%env.linewidth);
-		t.y = randI(0-env.lineheight, canvas.height);
-		t.sp = 5*Math.random()+3;
-		t.op = randI(25,255);
-		t.tip = false;
-		t.alpha = randI(25,100)/255.0;
-		//bright tip
-		if (randI(1,10) == 10)
-		{
-			t.tip = true;
-			t.alpha = 220/255.0;
-		}
-		env.linelist.push(t);
-	}
-	//remove extra lines
-	while (env.linelist.length > env.linecount)
-	{
-		env.linelist.pop();
-	}
-	//count tipcount
-	var i;
-	for (i=env.linelist.length-1;i>=0;i--) {
-		if (env.linelist[i].tip) env.tipcount++;
-	}
-
-}
-
-function initGL(reload)
-{
-	prepareLines();
-	env.ctime = 0;
-	env.cup = 1.0;
-
-	//setup lines
-	var length = env.linelist.length;
-	var linegeo = genGLGradientGeo(2,1024,1.0,1.0,1.0,0.0,1.0);
-	var tipgeo = genGLGradientGeo(2,64,1.0,1.0,1.0,0.0,1.0);
-	linegeo.maxInstancedCount = length;
-	var a = linegeo.addAttribute('opacity',new THREE.InstancedBufferAttribute(new Float32Array(length), 1, 1));
-	linegeo.addAttribute('offset',new THREE.InstancedBufferAttribute(new Float32Array(3*length), 3, 1));
-	linegeo.getAttribute('offset').dynamic = true;
-	tipgeo.maxInstancedCount = env.tipcount;
-	tipgeo.addAttribute('opacity',new THREE.InstancedBufferAttribute(new Float32Array(length), 1, 1));
-	tipgeo.addAttribute('offset',new THREE.InstancedBufferAttribute(new Float32Array(3*length), 3, 1));
-	tipgeo.getAttribute('offset').dynamic = true;
-
-	var shader = genShader();
-	var lineobj = new THREE.Mesh(linegeo, shader);
-	var tipobj = new THREE.Mesh(tipgeo, shader);
-	lineobj.scale.x=env.linewidth/2;
-	tipobj.scale.x=env.linewidth/2;
-	lineobj.scale.y=env.lineheight/1024;
-	tipobj.scale.y=env.tipheight/64;
-	tipobj.position.z = 2;
-	scene.add(lineobj);
-	scene.add(tipobj);
-
-	if (!reload) {
-	//setup color
-	var colorgeo = new THREE.PlaneGeometry(canvas.width,canvas.height);
-	var colorshader = genShaderBlend();
-	colorshader.uniforms["resolution"].value.set(canvas.width,canvas.height);
-	var colorobj = new THREE.Mesh(colorgeo, colorshader );
-	colorobj.position.x = canvas.width/2;
-	colorobj.position.y = canvas.height/2;
-	colorobj.position.z = 1;
-	scene.add(colorobj);
-	env.csback = colorobj;
-	colorSpanGL(true);
-	colorSpanGL(false);
-	}
-	else
-	{
-		scene.add(env.csback);
-	}
-
-	// setup data structs
-	env.line = {geo: linegeo, obj: lineobj};
-	env.tip = {geo: tipgeo, obj: tipobj};
-
-	//set line opacities
-	var opacities = env.line.geo.getAttribute('opacity').array;
-	var opacitiestip = env.tip.geo.getAttribute('opacity').array;
-	var opi = 0;
-	var opt = 0;
-	var i,j;
-	for (i=env.linelist.length-1;i>=0;i--) {
-		j = env.linelist[i];
-		opacities[opi++] = j.alpha;
-		if (j.tip) opacitiestip[opt++] = 0.6274509;
-	}
-	env.line.geo.getAttribute('opacity').needsUpdate = true;
-	env.tip.geo.getAttribute('opacity').needsUpdate = true;
-
-	//setup fade overlay
-	var fadeB = genGLGradientGeo(canvas.width,canvas.height/2,0.0,0.0,0.0,0.0,1.0)
-	fadeB.maxInstancedCount = 1;
-	fadeB.addAttribute('opacity',new THREE.InstancedBufferAttribute(new Float32Array([1.0]), 1, 1));
-	fadeB.addAttribute('offset',new THREE.InstancedBufferAttribute(new Float32Array([0.0,0.0,0.0]), 3, 1));
-	var fadeBobj = new THREE.Mesh(fadeB, shader);
-	fadeBobj.position.z = 3;
-	fadeBobj.position.y = canvas.height/2
-	var fadeT = genGLGradientGeo(canvas.width,canvas.height/4,0.0,0.0,0.0,0.7,0.0)
-	fadeT.maxInstancedCount = 1;
-	fadeT.addAttribute('opacity',new THREE.InstancedBufferAttribute(new Float32Array([1.0]), 1, 1));
-	fadeT.addAttribute('offset',new THREE.InstancedBufferAttribute(new Float32Array([0.0,0.0,0.0]), 3, 1));
-	var fadeTobj = new THREE.Mesh(fadeT, shader);
-	fadeTobj.position.z = 3;
-	scene.add(fadeBobj);
-	scene.add(fadeTobj);
-}
-
-function GLdraw()
-{
-	var offsets = env.line.geo.getAttribute('offset').array;
-	var offsetstip = env.tip.geo.getAttribute('offset').array;
-	var ofi = 0, oft = 0;
-	var widthScale = 2/env.linewidth;
-	var heightScale = 1024/env.lineheight;
-	var heightScaleS = 64/env.tipheight;
-	var i,j;
-	for (i=env.linelist.length-1;i>=0;i--)
-	{
-		j = env.linelist[i];
-		offsets[ofi++] = j.x*widthScale;
-		offsets[ofi++] = j.y*heightScale;
-		ofi++;
-		//offsets[ofi++] = 0.0;
-		if (j.tip)
-		{
-			offsetstip[oft++] = j.x*widthScale;
-			offsetstip[oft++] = (j.y+env.lineheight-env.tipheight)*heightScaleS;
-			oft++;
-			//offsetstip[oft++] = 0.0;
-		}
-	}
-	env.line.geo.getAttribute('offset').needsUpdate = true;
-	env.tip.geo.getAttribute('offset').needsUpdate = true;
-
-	// set blend between two color gradients
-	env.csback.material.uniforms["opacity"].value = env.ctime/255.0;
-
-	// issue draw calls
-	renderer.render( scene, camera );
-	//console.log(renderer.info.render.calls);
-
-}
-
-function initCanvas()
-{
-	//generate gradient offscreen canvases
-	env.line = genGradient(env.linewidth,env.lineheight,255,255,255,0,1);
-	env.tip = genGradient(env.linewidth,env.tipheight,255,255,255,0,1);
-	env.fadeB = genGradient(canvas.width,canvas.height/2,0,0,0,0,1);
-	env.fadeT = genGradient(canvas.width,canvas.height/4,0,0,0,0.7,0);
-	//create colorblend canvases
-	env.cs = document.createElement("canvas");
-	env.cs.width = canvas.width;
-	env.cs.height = canvas.height;
-	colorSpan(true);
-	env.cs2 = document.createElement("canvas");
-	env.cs2.width = canvas.width;
-	env.cs2.height = canvas.height;
-	colorSpan(false);
-	env.csback = document.createElement("canvas");
-	env.csback.width = canvas.width;
-	env.csback.height = canvas.height;
-
-	prepareLines();
-	env.ctime = 0;
-	env.cup = 1.0;
-}
-
-function update(dt)
-{
-	var i,j,cw,ch;
-	cw = canvas.width;
-	ch = canvas.height;
-	//update lines
-	for (i=env.linelist.length-1;i>=0;i--)
-	{
-		j = env.linelist[i];
-		j.y = j.y + (j.sp*env.linespeed) * dt;
-		if (j.y > ch) 
-		{
-			j.y = 0 - env.lineheight;
-		}
-	}
-	//update background color
-	env.ctime = env.ctime + (env.cup * env.cspeed * dt);
-
-	if (env.ctime > 255) 
-	{
-		env.ctime = 255;
-		env.cup = -1.0;
-		if (usingGL) colorSpanGL(true);
-		else colorSpan(true);
-	}
-	if (env.ctime < 0)
-	{
-		env.ctime = 0;
-		env.cup = 1.0;
-		if (usingGL) colorSpanGL(false);
-		else colorSpan(false);
-	}
-
-}
-
-function draw(dt)
-{
-	var i,j,ctx,ctx3,cw,ch;
-	cw = canvas.width;
-	ch = canvas.height;
-	ctx = canvas.getContext("2d");
-	//clear canvases that are not opaque
-	//ctx.clearRect(0,0,cw,ch);
-	ctx.fillStyle = "#000";
-	ctx.fillRect(0,0,cw,ch);
-	//draw lines
-	for (i=env.linelist.length-1;i>=0;i--)
-	{
-		j = env.linelist[i];
-		ctx.globalAlpha = j.alpha;
-		ctx.drawImage(env.line, cw-j.x, j.y);
-	}
-	ctx.globalAlpha = 1.0;
-
-	//preblend color gradient overlay to temp canvas
-	ctx3 = env.csback.getContext("2d");
-	ctx3.globalAlpha = 1.0;
-	ctx3.drawImage(env.cs,0,0,cw,ch);
-	ctx3.globalAlpha = env.ctime/255;
-	ctx3.drawImage(env.cs2,0,0,cw,ch);
-
-	//multiply overlay
-	ctx.globalCompositeOperation = "multiply";
-	ctx.drawImage(env.csback,0,0,cw,ch);
-	ctx.globalCompositeOperation = "source-over";
-	
-	//draw small lines
-	//ctx.globalAlpha = 160.0/255.0;
-	ctx.globalAlpha = 0.6274509;
-	for (i=env.linelist.length-1;i>=0;i--)
-	{
-		j = env.linelist[i];
-		if (j.tip)
-		{
-			ctx.drawImage(env.tip,cw-j.x,j.y+env.lineheight-env.tipheight);
-		}
-	}
-	ctx.globalAlpha = 1.0;
-
-	//draw top gradient
-	ctx.drawImage(env.fadeT,0,0);
-	//draw bottom gradient
-	ctx.drawImage(env.fadeB,0,ch-env.fadeB.height);
-
-	
-}
-
-function setLineCount(n)
-{
-	if (n!=env.linedensity)
-	{
-		env.linedensity = n;
-		prepareLines();
-	}
-	if (usingGL) {
-		while (scene.children.length > 0) scene.remove(scene.children[0]);
-		initGL(true);
-	}
-
-}
-
-function setLineHeight(n)
-{
-	if (n!=env.lineheight)
-	{
-		var oldheight = env.lineheight;
-		env.lineheight = n;
-		if (env.lineheight < 128) env.tipheight = env.lineheight/2;
-		else env.tipheight = 64;
-		if (usingGL) {
-			env.line.obj.scale.y=n/1024;
-			env.tip.obj.scale.y=env.tipheight/64;
-		} else {
-			env.line = genGradient(env.linewidth,env.lineheight,255,255,255,0,1);
-			env.tip = genGradient(env.linewidth,env.tipheight,255,255,255,0,1);
-		}
-		for (var i=0; i < env.linelist.length; i++)
-		{
-			var j = env.linelist[i];
-			j.y = j.y + (oldheight - env.lineheight);
-
-			//don't jump all shrunken lines to exact top
-			//use original bottom displacement
-			if ((oldheight > n)&&(j.y > canvas.height)) 
-			{
-				j.y = 0 - env.lineheight - (j.y-canvas.height);
-			}
-
-		}
-	}
-}
-
-function setLineWidth(n)
-{
-	if (n<=0 || n > 8) return;
-	env.linewidth = n;
-	if (usingGL) {
-		env.line.obj.scale.x=n/2;
-		env.tip.obj.scale.x=n/2;
 	} else {
-		env.line = genGradient(env.linewidth,env.lineheight,255,255,255,0,1);
-		env.tip = genGradient(env.linewidth,env.tipheight,255,255,255,0,1);
+		// use client value to get actual size ignoring css
+		const aspectRatio = gl.canvas.clientWidth/gl.canvas.clientHeight;
+		
+		//triangles will be drawn on plane of half canvas.height distance for full converage in perspective projection
+		const perspectiveMatrix = perspectMatrix(90, aspectRatio, 0.1, 1000);
+
+		const scaleFactor = 2.0 / gl.canvas.height;
+		const modelMatrix = mat4.create();
+		mat4.translate(modelMatrix, modelMatrix, [0,0, -1]);
+		mat4.scale(modelMatrix, modelMatrix, [scaleFactor,scaleFactor,scaleFactor]);
+		mat4.rotateZ(modelMatrix, modelMatrix, glMatrix.toRadian(180));
+		mat4.rotateZ(modelMatrix, modelMatrix, glMatrix.toRadian(chromad.rotation));
+		//mat4.rotateX(modelMatrix, modelMatrix, glMatrix.toRadian(-8));
+
+		state.camera.projectionMatrix = perspectiveMatrix;
+		state.camera.viewMatrix = modelMatrix;
+		state.camera.viewPort.x = 0;
+		state.camera.viewPort.y = 0;
+		state.camera.viewPort.width = gl.drawingBufferWidth;
+		state.camera.viewPort.height = gl.drawingBufferHeight;
+
 	}
 }
 
-function setLineSpeed(n)
-{
-	if (n!=env.linespeed)
-	{
-		env.linespeed = n/3;
-	}
+function bufferstats() {
+	gl.bindBuffer(gl.ARRAY_BUFFER, chromagl.bufferOffset.front.buffer);
+	console.log("LineCount: " + chromad.linecount);
+	console.log("LineList: " + chromad.linelist.length);
+	console.log("Lineinuse: " + chromagl.linesInUse);
+	console.log("Linebuffer size:" + chromagl.lineBuffer.byteLength);
+	console.log("GLBuffer size: " + gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE));
+	gl.bindBuffer(gl.ARRAY_BUFFER, null);
 }
 
-function setColorSpeed(n)
-{
-	if (n!=env.cspeed)
-	{
-		env.cspeed = n;
-	}
+// Webgl context creation error event handler
+function contextError(event) {
+	console.error("WebGL Context could not be created.");
 }
 
-function toggleGL(enabled)
-{
-	if ((usingGL && enabled)||(!usingGL && !enabled)) {
-		return;
-	}
-	window.cancelAnimationFrame(env.frameID);
-	if (container) document.body.removeChild(container);
-
-	// cleanup webgl
-	if (renderer) {
-		renderer.dispose();
-		renderer.forceContextLoss();
-		renderer = null;
-	}
-
-	// initiate toggle
-	if (!usingGL && enabled)
-	{
-		console.log("Enabling WebGL");
-		usingGL = true;
-		start();
-	}
-	if (usingGL && !enabled)
-	{
-		console.log("Enabling Canvas");
-		usingGL = false;
-		start();
-	}
+// Webgl context lost event handler
+function contextLost(event) {
+	event.preventDefault();
+	cancelAnimationFrame(state.frameID);
 }
 
-function figuresize()
-{
-	if (usingGL) {
-		var boundsize = container.getBoundingClientRect();
-		var w = boundsize.width;
-		var h = boundsize.height;
-		camera.left = w/-2;
-		camera.right = w/2;
-		camera.top = h/2;
-		camera.bottom = h/-2;
-		camera.updateProjectionMatrix();
-		camera.position.x = w/2;
-		camera.position.y = h/2;
-		renderer.setSize(w,h);
-		while (scene.children.length > 0) scene.remove(scene.children[0]);
-		initGL();
-	} else {
-		var boundsize = canvas.getBoundingClientRect();
-		canvas.width = boundsize.width;
-		canvas.height = boundsize.height;
-		initCanvas();
-	}
-	//randomize line x and y for even distribution
-	var i;
-	for (i=env.linelist.length-1;i>=0;i--) {
-		env.linelist[i].x = randI(0,canvas.width)
-		env.linelist[i].y = randI(0-env.lineheight, canvas.height);
-	}
+// Webgl context restored event handler
+function contextRegen() {
+	const dpr = state.dprscale ? (window.devicePixelRatio || 1) : 1;
+	const dimensions = canvas.getBoundingClientRect();
+	canvas.width = dimensions.width * dpr;
+	canvas.height = dimensions.height * dpr;
+	Program.clearAll();
+	setupGL(canvas);
+	run();
 }
 
-function run()
-{
-	if (usingGL) initGL();
-	else initCanvas();
-	var last = performance.now() / 1000;
-	var fpsThreshold = 0;	
-	env.frameID = window.requestAnimationFrame(tickweb);
-
-	function tickweb() {
-		// Keep animating
-		env.frameID = window.requestAnimationFrame(tickweb);
-
-		// Figure out how much time passed since the last animation
-		var now = performance.now() / 1000;
-		var dt = Math.min(now - last, 1);
-		last = now;
-
-		// If there is an FPS limit, abort updating the animation if we reached the desired FPS
-		if (env.fps > 0 && env.fpslock) {
-			fpsThreshold += dt;
-			if (fpsThreshold < 1.0 / env.fps) {
-				return;
-			}
-			fpsThreshold -= 1.0 / env.fps;
-		}
-
-		// My wallpaper animation/drawing code goes here!
-		if (usingGL) {
-			update(dt);
-			GLdraw();
-		} else {
-			update(dt);
-			draw(dt);
-		}
-	}
+// test lost and restore for webgl
+function testLoss() {
+	let ext = gl.getExtension('WEBGL_lose_context');
+	ext.loseContext();
+	window.setTimeout(function(ext) {
+		ext.restoreContext();
+	},1000,ext);
 }
 
-//wallpaper engine events
-window.wallpaperPropertyListener = {
-	applyUserProperties: function(properties) {
-		if (properties.linecount) {
-			setLineCount(properties.linecount.value);
-		}
-		if (properties.lineheight) {
-			setLineHeight(properties.lineheight.value);
-		}
-		if (properties.linewidth) {
-			setLineWidth(properties.linewidth.value);
-		}
-		if (properties.linespeed) {
-			setLineSpeed(properties.linespeed.value);
-		}
-		if (properties.colorspeed) {
-			setColorSpeed(properties.colorspeed.value);
-		}
-		if (properties.fpslock) {
-			env.fpslock = properties.fpslock.value;
-		}
-		if (properties.rendererpick) {
-			var rendid = properties.rendererpick.value;
-			if (rendid == 1) toggleGL(true);
-			if (rendid == 2) toggleGL(false);
-		}
-	},
-	applyGeneralProperties: function(properties) {
-		if (properties.fps) {
-			env.fps = properties.fps;
-		}
+function onResize() {
+	if (state.resizeID != null) {
+		window.clearTimeout(state.resizeID);
+		state.resizeID = null;
 	}
-};
+	state.resizeID = window.setTimeout(onResizeActivate, 250);
+}
 
-console.log("Chroma Drencher v1.1");
+function onResizeActivate() {
+	//console.log("Window Resized");
+	const dpr = state.dprscale ? (window.devicePixelRatio || 1) : 1;
+	const dimensions = canvas.getBoundingClientRect();
+	canvas.width = dimensions.width * dpr;
+	canvas.height = dimensions.height * dpr;
+	setCamera(gl);
+	chromad.prepareLines();
+	chromagl.lineBufferReload(false);
+}
+
+function run() {
+	state.lastTime = performance.now() / 1000;
+	state.frameID = window.requestAnimationFrame(onAnimationFrame);
+}
+
+function onAnimationFrame(timestamp) {
+	// Keep animating
+	state.frameID = window.requestAnimationFrame(onAnimationFrame);
+
+	// Figure out how much time passed since the last animation
+	const now = performance.now() / 1000;
+	let dt = Math.min(now - state.lastTime, 1);
+	state.lastTime = now;
+
+	// accumulate total time over skipped frames
+	state.totaldt += dt;
+
+	// seperate update would go here if updating independent of draw
+	//
+
+	// If there is an FPS limit, abort updating the animation if we reached the desired FPS
+	// this reqires canvas to preserve drawing buffer
+	if (state.fps > 0 && state.fpslock) {
+		state.fpsThreshold += dt;
+		if (state.fpsThreshold < 1.0 / state.fps) {
+			return;
+		}
+		state.fpsThreshold -= 1.0 / state.fps;
+	}
+
+	// update state using total dt
+	chromad.update(state.totaldt);
+	chromagl.update(state.totaldt);
+
+	// Set 2d canvas camera and draw scene
+	setCamera(gl);
+	drawGL();
+
+	state.totaldt = 0;
+	state.lastDt = dt;
+}
+
+
 start();
-})();
