@@ -1,4 +1,4 @@
-debugEnabled = false;
+debugEnabled = true;
 
 let debug = {
 	dcount: 0,

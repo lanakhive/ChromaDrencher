@@ -22,14 +22,16 @@ function Chroma() {
 	this.gradientColors1 = [];
 	this.gradientColors2 = [];
 	this.backgroundColor = [0,0,0];
-	//this.colorList = [[255,40,100],[255,255,0],[255,150,0],[150,0,255],[150,255,100],[255,0,200],[40,100,255]];
-	this.colorList = [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]];
+	this.colorList = [[255,40,100],[255,255,0],[255,150,0],[150,0,255],[150,255,100],[255,0,200],[40,100,255]];
 	this.colorMax = 5;
-	//this.colorCustom = [[255,40,100],[255,255,0],[255,150,0],[150,0,255],[150,255,100],[255,0,200],[40,100,255]];
-	this.colorCustom = [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]];
+	this.colorCustom = [[255,40,100],[255,255,0],[255,150,0],[150,0,255],[150,255,100],[255,0,200],[40,100,255]];
 	this.preview = false;
 	this.previewState = {};
 	this.loadedCount = 0;
+
+	// default to black since wallpaper engine will load colors later
+	//this.colorList = [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]];
+	//this.colorCustom = [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]];
 
 	this.setupChroma();
 }
